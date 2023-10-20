@@ -1,39 +1,135 @@
 <!DOCTYPE html>
-
 <html lang="en">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNIST</title>
+    <title>MNIST Digit Predictor</title>
+    <style>
+      #canvas {
+        border: 2px solid black;
+        margin-top: 10px;
+      }
+    </style>
   </head>
   <body>
-    <h1>MNIST</h1>
+    <h1>MNIST Digit Predictor</h1>
+    <canvas id="canvas" width="280" height="280"></canvas>
+    <br/>
+    <h2>Prediction: <span id="prediction"></span></h2>
+    <button id="clearButton">Clear</button>
+
+    <!-- Include the ONNX Runtime Web library -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script>
-      const getImgData = () => {
-        const data = []
-        for (let i = 0; i < 1 * 1 * 28 * 28; ++i) {
-          data.push(0)
+      // Canvas setup for drawing
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 20;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'white';
+      
+      let isDrawing = false;
+
+      canvas.onmousedown = (e) => {
+        isDrawing = true;
+        ctx.beginPath();
+        ctx.moveTo(e.offsetX, e.offsetY);
+      };
+
+      canvas.onmousemove = (e) => {
+        if (isDrawing) {
+          ctx.lineTo(e.offsetX, e.offsetY);
+          ctx.stroke();
         }
-        return data
-      }
+      };
+
+     
+      // Function to clear the canvas
+      const clearCanvas = () => {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      };
+
+      // Get image data from the canvas
+      const getImgData = () => {
+  // Create a temporary canvas to draw a downscaled image.
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCanvas.width = 28;
+  tempCanvas.height = 28;
+
+  // Draw the original canvas image to the temporary canvas, effectively resizing it.
+  tempCtx.drawImage(canvas, 0, 0, 28, 28);
+
+  // Now, extract the image data from the temporary canvas.
+  const imageData = tempCtx.getImageData(0, 0, 28, 28);
+  const data = [];
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    // For the MNIST model, we need grayscale images, so average the RGB components.
+    // Also, MNIST images have a white background and black foreground, so we invert the colors.
+    const grayscale = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
+    data.push((255 - grayscale) / 255); // Normalizing data to be between 0 and 1 after inverting
+  }
+  return data;
+};
 
       const softmax = (data) => {
-        const exps = data.map((value) => Math.exp(value))
-        const sumExps = exps.reduce((acc, val) => acc + val)
-        return exps.map((exp) => exp / sumExps)
-      }
+        // Your softmax function remains unchanged
+        const exps = data.map((value) => Math.exp(value));
+        const sumExps = exps.reduce((acc, val) => acc + val, 0);
+        return exps.map((exp) => exp / sumExps);
+      };
 
       const main = async () => {
-        const session = await ort.InferenceSession.create('./mnist.onnx')
-        const data = Float32Array.from(getImgData()).map((pixel) => (pixel - 0.1307) / 0.3081)
-        const input = new ort.Tensor('float32', data, [1, 1, 28, 28])
-        const result = await session.run({ 'input': input })
-        const logits = result.output.data
-        const probas = softmax(logits)
-        console.log("=== Result", probas)
-      }
-      main()
+  // Create an ONNX session with the model.
+  const session = await ort.InferenceSession.create('./mnist_model.onnx');
+  
+  document.getElementById('clearButton').onclick = async () => {
+    clearCanvas();
+
+  };
+  const predict = async () => {
+    // Get the image data (28x28) from your canvas or image element.
+    const data = getImgData(); // This function should return a Float32Array representing the image.
+
+    // Create a tensor with the image data.
+    const inputTensor = new ort.Tensor('float32', data, [1, 1, 28, 28]);
+
+    // Run the model with the tensor as input.
+    const outputMap = await session.run({ input: inputTensor });
+
+    // Instead of using outputMap.values(), we directly access the output tensor by key.
+    // This assumes 'output' is the name of the output layer. Adjust as necessary for your model.
+    const outputTensor = outputMap.output;
+
+    // Retrieve the actual data from the tensor.
+    const outputData = outputTensor.data;
+
+    // (Optional) Process the output data here (apply softmax if necessary).
+    const probabilities = softmax(Array.from(outputData));
+
+    // Find the predicted digit: the index of the highest probability.
+    const prediction = probabilities.indexOf(Math.max(...probabilities));
+
+    document.getElementById('prediction').textContent = prediction;
+    
+    
+  };
+
+  canvas.onmouseup = () => {
+        isDrawing = false;
+        predict();
+      };
+
+
+
+};
+
+
+      main();
     </script>
   </body>
 </html>

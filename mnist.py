@@ -16,6 +16,7 @@ import torchvision.transforms as T
 import torch.nn
   
 from torchvision.transforms import (Compose, Lambda, RandomRotation, ToTensor)
+import onnx
 
 
 
@@ -96,50 +97,74 @@ def step(model , optimizer : torch.optim, loss_func,  loaders : Loaders, device 
 
 
 
-model = CNN().to("cuda")
-epochs = 10
-optim = AdamW(params=model.parameters(), lr=0.01)
-best_acc = 0
-train_acc_hist, test_acc_hist, train_loss_hist, test_loss_hist = [], [], [], []
+def train(model, optimizer, loss_func, loaders, device, epochs):
 
-for epoch in range(epochs):
-    train_loss, train_acc = step(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda")
-    test_loss, test_acc = step(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", train=False)
+    best_acc = 0
+    train_acc_hist, test_acc_hist, train_loss_hist, test_loss_hist = [], [], [], []
 
-    if test_acc > best_acc:
-        best_acc = test_acc
-        torch.save(model.state_dict(), "mnist_model.pt")
-    print("Epoch:", epoch + 1)
-    print(f"train loss:{train_loss:2f}")
-    print(f"test loss:{test_loss:2f}")
-    print(f"{train_acc * 100:.2f}%")
-    print(f"{test_acc * 100:.2f}%")
-    train_loss_hist.append(train_loss)
-    test_loss_hist.append(test_loss)
-    train_acc_hist.append(train_acc)
-    test_acc_hist.append(test_acc)
+    for epoch in range(epochs):
+        train_loss, train_acc = step(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda")
+        test_loss, test_acc = step(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", train=False)
+
+        if test_acc > best_acc:
+            best_acc = test_acc
+            torch.save(model.state_dict(), "mnist_model.pt")
+        print("Epoch:", epoch + 1)
+        print(f"train loss:{train_loss:2f}")
+        print(f"test loss:{test_loss:2f}")
+        print(f"{train_acc * 100:.2f}%")
+        print(f"{test_acc * 100:.2f}%")
+        train_loss_hist.append(train_loss)
+        test_loss_hist.append(test_loss)
+        train_acc_hist.append(train_acc)
+        test_acc_hist.append(test_acc)
 
 
-fig, ax = plt.subplots(1,2, figsize=(10,5))
-print(f"Best Test Accuracy{best_acc * 100}%")
+    fig, ax = plt.subplots(1,2, figsize=(10,5))
+    print(f"Best Test Accuracy{best_acc * 100}%")
 
-ax[0].plot(np.arange(epochs), train_loss_hist, label="train loss")
-ax[0].plot(np.arange(epochs), test_loss_hist, label="test loss")
-ax[0].set_xlabel("epochs")
-ax[0].set_ylabel("loss")
-ax[0].legend()
+    ax[0].plot(np.arange(epochs), train_loss_hist, label="train loss")
+    ax[0].plot(np.arange(epochs), test_loss_hist, label="test loss")
+    ax[0].set_xlabel("epochs")
+    ax[0].set_ylabel("loss")
+    ax[0].legend()
 
-ax[1].plot(np.arange(epochs), train_acc_hist, label="train acc")
-ax[1].plot(np.arange(epochs), test_acc_hist, label="test acc")
-ax[1].set_xlabel("epochs")
-ax[1].set_ylabel("accuracy")
-ax[1].legend()
+    ax[1].plot(np.arange(epochs), train_acc_hist, label="train acc")
+    ax[1].plot(np.arange(epochs), test_acc_hist, label="test acc")
+    ax[1].set_xlabel("epochs")
+    ax[1].set_ylabel("accuracy")
+    ax[1].legend()
 
-plt.legend()
-plt.show()
+    plt.legend()
+    plt.show()
    
 
 
+if __name__ == "__main__":
+    model = CNN().to("cuda")
+    optim = AdamW(model.parameters(), lr=1e-3)
+    #train(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", epochs=10)
+
+    model.load_state_dict(torch.load("mnist_model.pt"))
+    # Assuming your input is a 1x28x28 image - typical for MNIST
+    dummy_input = torch.randn(1, 1, 28, 28, device='cuda')
+
+    # Set the model to evaluation mode
+    model.eval()
+
+        # Export the trained model to ONNX
+    input_names = ["input"]  # or some other name for your input
+    output_names = ["output"]  # or some other name for your output
+    torch.onnx.export(model, dummy_input, "mnist_model.onnx", verbose=True, input_names=input_names, output_names=output_names)
+
+
+    onnx_model = onnx.load("mnist_model.onnx")
+    onnx.checker.check_model(onnx_model)
+
+    # Print a human-readable representation of the graph
+    onnx.helper.printable_graph(onnx_model.graph)
+
+    print(model(dummy_input).argmax(dim=1))
 
 
 
