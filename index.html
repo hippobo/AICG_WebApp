@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MNIST</title>
+  </head>
+  <body>
+    <h1>MNIST</h1>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script>
+      const getImgData = () => {
+        const data = []
+        for (let i = 0; i < 1 * 1 * 28 * 28; ++i) {
+          data.push(0)
+        }
+        return data
+      }
+
+      const softmax = (data) => {
+        const exps = data.map((value) => Math.exp(value))
+        const sumExps = exps.reduce((acc, val) => acc + val)
+        return exps.map((exp) => exp / sumExps)
+      }
+
+      const main = async () => {
+        const session = await ort.InferenceSession.create('./mnist.onnx')
+        const data = Float32Array.from(getImgData()).map((pixel) => (pixel - 0.1307) / 0.3081)
+        const input = new ort.Tensor('float32', data, [1, 1, 28, 28])
+        const result = await session.run({ 'input': input })
+        const logits = result.output.data
+        const probas = softmax(logits)
+        console.log("=== Result", probas)
+      }
+      main()
+    </script>
+  </body>
+</html>
