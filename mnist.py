@@ -141,6 +141,7 @@ def train(model, optimizer, loss_func, loaders, device, epochs):
 
 
 if __name__ == "__main__":
+    
     model = CNN().to("cuda")
     optim = AdamW(model.parameters(), lr=1e-3)
     #train(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", epochs=10)

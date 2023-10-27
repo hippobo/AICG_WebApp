@@ -13,8 +13,24 @@
   </head>
   <body>
     <h1>MNIST Digit Predictor</h1>
-    <canvas id="canvas" width="280" height="280"></canvas>
+    <canvas id="canvas" width="350" height="350"></canvas>
     <br/>
+    <h2>Temp Canvas</h2>
+    <canvas id="tempCanvas" width="28" height="28"></canvas>
+
+    <br/>
+    <h2>Probabilities for each digit:</h2>
+<table id="probabilityTable">
+  <thead>
+    <tr>
+      <th>Digit</th>
+      <th>Probability</th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
+    
     <h2>Prediction: <span id="prediction"></span></h2>
     <button id="clearButton">Clear</button>
 
@@ -24,6 +40,8 @@
       // Canvas setup for drawing
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
+      const ctxTemp = document.getElementById('tempCanvas').getContext('2d');
+
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.lineWidth = 20;
@@ -51,7 +69,7 @@
       const clearCanvas = () => {
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        document.getElementById('prediction').textContent = prediction;
+        document.getElementById('prediction').textContent = "";
       };
 
       // Get image data from the canvas
@@ -59,14 +77,15 @@
   // Create a temporary canvas to draw a downscaled image.
   const tempCanvas = document.createElement('canvas');
   const tempCtx = tempCanvas.getContext('2d');
-  tempCanvas.width = 28;
-  tempCanvas.height = 28;
+  tempCanvas.width = 350;
+  tempCanvas.height = 350;
 
   // Draw the original canvas image to the temporary canvas, effectively resizing it.
   tempCtx.drawImage(canvas, 0, 0, 28, 28);
 
   // Now, extract the image data from the temporary canvas.
   const imageData = tempCtx.getImageData(0, 0, 28, 28);
+  ctxTemp.putImageData(imageData, 0, 0);
   const data = [];
   for (let i = 0; i < imageData.data.length; i += 4) {
     // For the MNIST model, we need grayscale images, so average the RGB components.
@@ -109,14 +128,28 @@
     // Retrieve the actual data from the tensor.
     const outputData = outputTensor.data;
 
-    // (Optional) Process the output data here (apply softmax if necessary).
-    const probabilities = softmax(Array.from(outputData));
+      // Process the output data here (apply softmax if necessary).
+  const probabilities = softmax(Array.from(outputData));
 
-    // Find the predicted digit: the index of the highest probability.
-    const prediction = probabilities.indexOf(Math.max(...probabilities));
+// Find the predicted digit: the index of the highest probability.
+const prediction = probabilities.indexOf(Math.max(...probabilities));
 
-    document.getElementById('prediction').textContent = prediction;
+// Update the probabilities display for each digit.
+const probabilityTable = document.getElementById('probabilityTable').getElementsByTagName('tbody')[0];
+probabilityTable.innerHTML = ""; // Clear the previous probabilities
+
+probabilities.forEach((probability, index) => {
+  // Create a new row and two cells (for the digit and its probability).
+  const newRow = probabilityTable.insertRow();
+  const digitCell = newRow.insertCell(0);
+  const probabilityCell = newRow.insertCell(1);
+
+  // Set the text of the cells.
+  digitCell.textContent = index;
+  probabilityCell.textContent = probability.toFixed(4); // Display probability up to 4 decimal places
+});
     
+document.getElementById('prediction').textContent = prediction;
     
   };
 
