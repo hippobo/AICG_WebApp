@@ -83,11 +83,16 @@
     </div>
     <div>
         <canvas id="canvas" width="350" height="350"></canvas>
-        <br>
-        <button id="clearButton">Clear</button>
+        
+        
     </div>
+    <div id="titleImages">
+      <h1>Generated Image</h1>
     <div id="generatedImages">
-        <h1>Generated Images</h1>
+      
+    </div>
+    <button id="clearButton">Clear Images</button>
+
     </div>
 </div>
 
@@ -126,7 +131,7 @@
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         document.getElementById('prediction').textContent = "";
-        document.getElementById('generatedImages').innerHTML = "";
+       
       };
 
       const getImgData = () => {
@@ -229,7 +234,7 @@ function generateRandomTensor(rows, cols) {
 
   
   document.getElementById('clearButton').onclick = async () => {
-    clearCanvas();
+    document.getElementById('generatedImages').innerHTML = "";
 
   };
 
@@ -300,6 +305,7 @@ displayGeneratedImage(imageDataGAN);
   canvas.onmouseup = () => {
         isDrawing = false;
         predict();
+        clearCanvas();
       };
 
 
