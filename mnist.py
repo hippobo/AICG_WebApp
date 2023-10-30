@@ -15,17 +15,21 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import torch.nn
   
-from torchvision.transforms import (Compose, Lambda, RandomRotation, ToTensor)
+from torchvision.transforms import (Compose, Normalize, Lambda, RandomRotation, ToTensor)
 import onnx
+from PIL import Image
+import onnxruntime as ort
 
 
 
 batch_size = 512
-transform_mnist = Compose([ToTensor()])
+transform_mnist = Compose([ToTensor(), Normalize((0.1307,), (0.3081,))])
 mnist_train = MNIST('./data', train=True, download=True, transform=transform_mnist)
 mnist_test = MNIST('./data', train=False, download=True, transform=transform_mnist)
 train_dataloader = DataLoader(mnist_train, batch_size=batch_size, shuffle=True, num_workers=8)
 test_dataloader = DataLoader(mnist_test, batch_size=batch_size, shuffle=False, num_workers=8)
+
+
 
 class Loaders(NamedTuple):
   train : DataLoader
@@ -144,11 +148,12 @@ if __name__ == "__main__":
     
     model = CNN().to("cuda")
     optim = AdamW(model.parameters(), lr=1e-3)
-    #train(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", epochs=10)
+    # train(model=model, optimizer=optim, loss_func=F.cross_entropy, loaders=loaders, device="cuda", epochs=10)
 
     model.load_state_dict(torch.load("mnist_model.pt"))
     # Assuming your input is a 1x28x28 image - typical for MNIST
     dummy_input = torch.randn(1, 1, 28, 28, device='cuda')
+    dummy_input = (dummy_input - 0.1307) / 0.3081
 
     # Set the model to evaluation mode
     model.eval()
@@ -165,7 +170,27 @@ if __name__ == "__main__":
     # Print a human-readable representation of the graph
     onnx.helper.printable_graph(onnx_model.graph)
 
-    print(model(dummy_input).argmax(dim=1))
+    # Load image
+    img = Image.open("tempCanvas.png").convert("L")  # Convert to grayscale
+
+    # Resize to 28x28
+
+    # Convert image to numpy array and normalize
+    img_array = np.array(img) / 255.0
+    img_array = (img_array - 0.1307) / 0.3081  # Standardize using MNIST mean and std
+
+    # Reshape and add batch dimension
+    img_array = img_array.reshape(1, 1, 28, 28).astype(np.float32)
+
+    sess = ort.InferenceSession("mnist_model.onnx")
+
+    # Perform inference
+    inputs = {"input": img_array}
+    output = sess.run(["output"], inputs)[0]
+
+    # Get the predicted class
+    prediction = np.argmax(output)
+    print("Predicted class:", prediction)
 
 
 

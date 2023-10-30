@@ -40,11 +40,10 @@
       // Canvas setup for drawing
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
-      const ctxTemp = document.getElementById('tempCanvas').getContext('2d');
 
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.lineWidth = 20;
+      ctx.lineWidth = 30;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.strokeStyle = 'white';
@@ -75,26 +74,34 @@
       // Get image data from the canvas
       const getImgData = () => {
   // Create a temporary canvas to draw a downscaled image.
-  const tempCanvas = document.createElement('canvas');
-  const tempCtx = tempCanvas.getContext('2d');
-  tempCanvas.width = 350;
-  tempCanvas.height = 350;
+  const tempCtx = document.getElementById('tempCanvas').getContext('2d');
+   
 
+  tempCanvas.width = 28;
+  tempCanvas.height = 28;
+  tempCtx.filter = 'grayscale(1)';
   // Draw the original canvas image to the temporary canvas, effectively resizing it.
   tempCtx.drawImage(canvas, 0, 0, 28, 28);
 
   // Now, extract the image data from the temporary canvas.
   const imageData = tempCtx.getImageData(0, 0, 28, 28);
-  ctxTemp.putImageData(imageData, 0, 0);
+
   const data = [];
   for (let i = 0; i < imageData.data.length; i += 4) {
-    // For the MNIST model, we need grayscale images, so average the RGB components.
-    // Also, MNIST images have a white background and black foreground, so we invert the colors.
-    const grayscale = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
-    data.push((255 - grayscale) / 255); // Normalizing data to be between 0 and 1 after inverting
+    const grayscale = imageData.data[i];
+    data.push((grayscale) / 255); // Inverted grayscale values
   }
-  return data;
+
+
+  // Standardization
+  const mean = 0.1307;
+  const std = 0.3081;
+  const standardizedData = data.map(value => (value - mean) / std);
+
+  return standardizedData; // This returns the standardized 1D array suitable for the model input.
 };
+
+
 
       const softmax = (data) => {
         // Your softmax function remains unchanged
