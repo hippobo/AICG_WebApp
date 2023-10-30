@@ -5,7 +5,9 @@ from torch import Tensor
 from torch.nn import (Conv2d,CrossEntropyLoss, Dropout, Flatten, Linear, MaxPool2d, Module,  ReLU, Sequential)
 from torch.optim import AdamW, Optimizer
 from torch.utils.data import DataLoader, Dataset
+import matplotlib.pyplot as plt
 from torchvision.datasets import MNIST
+from torchvision.utils import make_grid
 
 
 import matplotlib.pyplot as plt
@@ -14,6 +16,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 import torch.nn
+from torch.autograd import Variable
   
 
 import argparse
@@ -31,29 +34,34 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from IPython.display import HTML
-from torchvision.transforms import (Compose, Lambda, RandomRotation, ToTensor)
+from torchvision.transforms import (Compose, Normalize, ToTensor)
 import onnx
 from torch import nn
 
 
-BATCH_SIZE = 128
-transform_mnist = Compose([ToTensor()])
-NUM_WORKERS = 8
-image_size = 28
-nc = 1
-nz = 100
-ngf = 32
-ndf = 32
-ngpu = 1
-lr = 0.002
-beta1 = 0.5
-num_epochs = 30
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+BATCH_SIZE = 32
+transform_mnist = Compose([
+        ToTensor(),
+        Normalize([0.5], [0.5])
+])
+
+img_size = 28 # Image size
+
+
+# Model
+z_size = 100
+generator_layer_size = [256, 512, 1024]
+discriminator_layer_size = [1024, 512, 256]
+num_workers = 8
+# Training
+epochs = 40  # Train epochs
+learning_rate = 1e-4
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
 mnist_train = (MNIST('./data', train=True, download=True, transform=transform_mnist))
-mnist_dataloader = DataLoader(mnist_train, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+mnist_dataloader = DataLoader(mnist_train, batch_size=BATCH_SIZE, shuffle=True, num_workers=num_workers)
 
 # real_batch = next(iter(mnist_dataloader))
 
@@ -64,200 +72,168 @@ mnist_dataloader = DataLoader(mnist_train, batch_size=BATCH_SIZE, shuffle=True, 
 
 # plt.show()
 
-# custom weights initialization called on ``netG`` and ``netD``
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.constant_(m.bias.data, 0)
-    
-
-class ConditionalGenerator(nn.Module):
-     def __init__(self, ngpu, n_classes):
-        super(ConditionalGenerator, self).__init__()
-        self.ngpu = ngpu
-        self.label_emb = nn.Embedding(n_classes, nz) 
-        self.main = nn.Sequential(
-            # input is Z, going into a convolution
-            nn.ConvTranspose2d(nz, ngf * 4, 3, 1, 0, bias=False),  # new layer
-            nn.BatchNorm2d(ngf * 4),
-            nn.ReLU(True),
-            # state size. (ngf*4) x 3 x 3
-            nn.ConvTranspose2d(ngf * 4, ngf * 2, 3, 2, 0, bias=False),  # modified
-            nn.BatchNorm2d(ngf * 2),
-            nn.ReLU(True),
-            # state size. (ngf*2) x 7 x 7
-            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),  # modified
-            nn.BatchNorm2d(ngf),
-            nn.ReLU(True),
-            # state size. (ngf) x 14 x 14
-            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),  # modified
-            nn.Tanh()
-            # state size. (nc) x 28 x 28
-        )
-
-     def forward(self, noise, labels):
-        # Concatenate label embedding with noise
-        gen_input = torch.mul(self.label_emb(labels), noise)
-        # gen_input shape should match the expected input shape for your architecture
-        return self.main(gen_input)
-
-    
-netG = ConditionalGenerator(ngpu, 10).to(DEVICE)
 
 
+class_list = ['0','1','2','3','4','5','6','7','8','9']
+class_num = len(class_list)
 
-class ConditionalDiscriminator(nn.Module):
-    def __init__(self, ngpu, n_classes):
-        super(ConditionalDiscriminator, self).__init__()
-        self.ngpu = ngpu
-        self.label_emb = nn.Embedding(n_classes, 50)  # for MNIST
-        self.main = nn.Sequential(
-            # input is (nc) x 28 x 28
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 14 x 14
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 7 x 7
-            nn.Conv2d(ndf * 2, 1, 7, 1, 0, bias=False),  # modified
-            nn.Sigmoid()
-            # state size. 1 x 1 x 1
-        )
-
-    def forward(self, img, labels):
-        # Concatenate label embedding and image
-        d_in = torch.cat((img.view(img.size(0), -1), self.label_emb(labels)), -1)
-        # You must reshape d_in to match the expected input shape for your architecture
-        return self.main(d_in.view(img.size(0), nc, image_size, image_size))
-
-netD = ConditionalDiscriminator(ngpu, 10).to(DEVICE)
-    # Initialize the ``BCELoss`` function
-criterion = nn.BCELoss()
-
-# Create batch of latent vectors that we will use to visualize
-#  the progression of the generator
-num_classes = 10
-fixed_noise = torch.randn(64, nz, 1, 1, device=DEVICE)
-fixed_labels = torch.randint(0, num_classes, (64,), dtype=torch.long, device=DEVICE)  # Random fixed labels
-
-
-# Establish convention for real and fake labels during training
-real_label = 1.
-fake_label = 0.
-
-# Setup Adam optimizers for both G and D
-optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
-optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
-
-# Training Loop
-
-# Lists to keep track of progress
-img_list = []
-G_losses = []
-D_losses = []
-iters = 0
-print("Starting Training Loop...")
-# For each epoch
-for epoch in range(num_epochs):
-    # For each batch in the dataloader
-    for i, data in enumerate(mnist_dataloader, 0):
-        # Get the inputs and the labels from the data tuple
-        inputs, labels = data
-        inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
-        b_size = inputs.size(0)
-
-        ############################
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-        ###########################
-        netD.zero_grad()
+class Discriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
         
-        # Forward pass real batch through D
-        output = netD(inputs, labels).view(-1)
-        # Calculate loss on all-real batch
-        errD_real = criterion(output, torch.full((b_size,), real_label, device=DEVICE))
-        errD_real.backward()
-        D_x = output.mean().item()
+        self.label_emb = nn.Embedding(10, 10)
+        
+        self.model = nn.Sequential(
+            nn.Linear(794, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x, labels):
+        x = x.view(x.size(0), 784)
+        c = self.label_emb(labels)
+        x = torch.cat([x, c], 1)
+        out = self.model(x)
+        return out.squeeze()
+    
+class Generator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+        self.label_emb = nn.Embedding(10, 10)
+        
+        self.model = nn.Sequential(
+            nn.Linear(110, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(256, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(1024, 784),
+            nn.Tanh()
+        )
+    
+    def forward(self, z, labels):
+        z = z.view(z.size(0), 100)
+        c = self.label_emb(labels)
+        x = torch.cat([z, c], 1)
+        out = self.model(x)
+        return out.view(x.size(0), 28, 28)
+    
+def discriminator_train_step(batch_size, discriminator, generator, d_optimizer, criterion, real_images, labels):
+    d_optimizer.zero_grad()
 
-        # Generate fake image batch with G
-        noise = torch.randn(b_size, nz, 1, 1, device=DEVICE)
-        random_labels = torch.randint(0, num_classes, (b_size,), dtype=torch.long, device=DEVICE)
-        fake = netG(noise, random_labels)
-        label = torch.full((b_size,), fake_label, device=DEVICE)
+    # train with real images
+    real_validity = discriminator(real_images, labels)
+    real_loss = criterion(real_validity, Variable(torch.ones(batch_size)).cuda())
+    
+    # train with fake images
+    z = Variable(torch.randn(batch_size, 100)).cuda()
+    fake_labels = Variable(torch.LongTensor(np.random.randint(0, 10, batch_size))).cuda()
+    fake_images = generator(z, fake_labels)
+    fake_validity = discriminator(fake_images, fake_labels)
+    fake_loss = criterion(fake_validity, Variable(torch.zeros(batch_size)).cuda())
+    
+    d_loss = real_loss + fake_loss
+    d_loss.backward()
+    d_optimizer.step()
+    return d_loss.item()
 
-        # Classify all fake batch with D
-        output = netD(fake.detach(), random_labels).view(-1)
-        # Calculate D's loss on the all-fake batch
-        errD_fake = criterion(output, label)
-        errD_fake.backward()
-        D_G_z1 = output.mean().item()
+def generator_train_step(batch_size, discriminator, generator, g_optimizer, criterion):
+    g_optimizer.zero_grad()
+    z = Variable(torch.randn(batch_size, 100)).cuda()
+    fake_labels = Variable(torch.LongTensor(np.random.randint(0, 10, batch_size))).cuda()
+    fake_images = generator(z, fake_labels)
+    validity = discriminator(fake_images, fake_labels)
+    g_loss = criterion(validity, Variable(torch.ones(batch_size)).cuda())
+    g_loss.backward()
+    g_optimizer.step()
+    return g_loss.item()
+def train(generator, discriminator, criterion, d_optimizer, g_optimizer, num_epochs=50, n_critic=5, display_step=50):
+    for epoch in range(num_epochs):
+        print('Starting epoch {}...'.format(epoch), end=' ')
+        for i, (images, labels) in enumerate(mnist_dataloader):
+            
+            step = epoch * len(mnist_dataloader) + i + 1
+            real_images = Variable(images).cuda()
+            labels = Variable(labels).cuda()
+            generator.train()
+            
+            d_loss = 0
+            for _ in range(n_critic):
+                d_loss = discriminator_train_step(len(real_images), discriminator,
+                                                  generator, d_optimizer, criterion,
+                                                  real_images, labels)
 
-        # Add the gradients from the all-real and all-fake batches
-        errD = errD_real + errD_fake
-        # Update D
-        optimizerD.step()
+            g_loss = generator_train_step(BATCH_SIZE, discriminator, generator, g_optimizer, criterion)
+            print(f"{i}/{BATCH_SIZE}", end=' ')
+            print('D: {:.4f}, G: {:.4f}'.format(d_loss, g_loss), end=' ')
+            
+            # if step % display_step == 0:
+            #     generator.eval()
+            #     z = Variable(torch.randn(9, 100)).cuda()
+            #     labels = Variable(torch.LongTensor(np.arange(9))).cuda()
+            #     sample_images = generator(z, labels).unsqueeze(1)
+            #     grid = make_grid(sample_images, nrow=3, normalize=True)
+            #     plt.figure(figsize=(10, 10))
+            #     plt.imshow(grid.permute(1, 2, 0).cpu().numpy())
+            #     plt.axis('off')
+            #     plt.show()
+                
+        print('Done!')
 
-        ############################
-        # (2) Update G network: maximize log(D(G(z)))
-        ###########################
-        netG.zero_grad()
+def generate_digit(generator, digit, num_images=1):
+    z = Variable(torch.randn(num_images, 100)).cuda()
+    label = torch.LongTensor([digit] * num_images).cuda()
+    imgs = generator(z, label).data.cpu()
+    imgs = 0.5 * imgs + 0.5
+    pil_imgs = [transforms.ToPILImage()(img) for img in imgs]
+    
+    return pil_imgs
+if __name__ == '__main__':
+    generator = Generator().cuda()
+    discriminator = Discriminator().cuda()
+    criterion = nn.BCELoss()
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
+        
+    #train(generator=generator, discriminator=discriminator, criterion=criterion, d_optimizer=d_optimizer, g_optimizer=g_optimizer)
+    #torch.save(generator.state_dict(), 'cGAN_mnist_generator.pt')
 
-        label.fill_(real_label)  # fake labels are real for generator cost
-        # Since D just updated, perform another forward pass of all-fake batch through D
-        output = netD(fake, random_labels).view(-1)
-        # Calculate G's loss based on this output
-        errG = criterion(output, label)
-        # Calculate gradients for G
-        errG.backward()
-        D_G_z2 = output.mean().item()
+   
+    generator.load_state_dict(torch.load("cGAN_mnist_generator.pt"))
+    generator.eval()
+    dummy_input_z = Variable(torch.randn(1, 100)).cuda()
+    dummy_input_label = Variable(torch.LongTensor([0])).cuda()
+    z = Variable(torch.randn(1, 100)).cuda()
+    # labels = torch.LongTensor([i for i in range(10) for _ in range(10)]).cuda()
+    # images = generator(z, labels).unsqueeze(1)
+    # grid = make_grid(images, nrow=10, normalize=True)
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # ax.imshow(grid.permute(1, 2, 0).data.cpu(), cmap='binary')
+    # ax.axis('off')
+    # plt.show()
 
-        # Update G
-        optimizerG.step()
-
-        # Output training stats
-        if i % 50 == 0:
-            print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f'
-                  % (epoch, num_epochs, i, len(mnist_dataloader),
-                     errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-
-        # Save Losses for plotting later
-        G_losses.append(errG.item())
-        D_losses.append(errD.item())
-
-        # Check how the generator is doing by saving G's output on fixed_noise
-        if (iters % 500 == 0) or ((epoch == num_epochs-1) and (i == len(mnist_dataloader)-1)):
-            with torch.no_grad():
-                fake = netG(fixed_noise, fixed_labels).detach().cpu()
-            img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
-
-        iters += 1
+        # Export the trained model to ONNX
+    input_names = ["inputTensor", "inputLabel"]  # or some other name for your input
+    output_names = ["output"]  # or some other name for your output
+    torch.onnx.export(generator, (dummy_input_z, dummy_input_label), "mnist_model_cGan.onnx", verbose=True, input_names=input_names, output_names=output_names)
 
 
-plt.figure(figsize=(10,5))
-plt.title("Generator and Discriminator Loss During Training")
-plt.plot(G_losses,label="G")
-plt.plot(D_losses,label="D")
-plt.xlabel("iterations")
-plt.ylabel("Loss")
-plt.legend()
-plt.show()
+    onnx_model = onnx.load("mnist_model_cGan.onnx")
+    onnx.checker.check_model(onnx_model)
 
-# Grab a batch of real images from the dataloader
-real_batch = next(iter(mnist_dataloader))
-
-# Plot the real images
-plt.figure(figsize=(15,15))
-plt.subplot(1,2,1)
-plt.axis("off")
-plt.title("Real Images")
-plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(DEVICE)[:64], padding=5, normalize=True).cpu(),(1,2,0)))
-
-# Plot the fake images from the last epoch
-plt.subplot(1,2,2)
-plt.axis("off")
-plt.title("Fake Images")
-plt.imshow(np.transpose(img_list[-1],(1,2,0)))
-plt.show()
+    # Print a human-readable representation of the graph
+    onnx.helper.printable_graph(onnx_model.graph)
+    # imgs = generate_digit(generator, 4, 5)
+    # for img in imgs:
+    #     plt.imshow(img, cmap='gray')
+    #     plt.show()

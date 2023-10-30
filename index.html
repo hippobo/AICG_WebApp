@@ -1,49 +1,106 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MNIST Digit Predictor</title>
+    <title>MNIST Digit Predictor/Generator</title>
     <style>
-      #canvas {
-        border: 2px solid black;
-        margin-top: 10px;
-      }
+        body {
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f6f6f6;
+        }
+
+        h1, h2 {
+            color: #333;
+        }
+
+        #content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 80vh;
+            padding: 20px;
+        }
+
+        #canvas {
+            border: 2px solid black;
+        }
+
+        #predictionPanel, #generatedImages {
+            width: 300px;
+            margin: 20px;
+        }
+
+        #probabilityTable {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #probabilityTable th, #probabilityTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        #probabilityTable th {
+            background-color: #f2f2f2;
+        }
+
+        button {
+            padding: 20px 40px;
+            margin-top: 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
     </style>
-  </head>
-  <body>
-    <h1>MNIST Digit Predictor</h1>
-    <canvas id="canvas" width="350" height="350"></canvas>
-    <br/>
-    <h2>Temp Canvas</h2>
-    <canvas id="tempCanvas" width="28" height="28"></canvas>
+</head>
+<body>
+<h1>MNIST Digit Predictor/Generator</h1>
+<div id="content">
+    <div id="predictionPanel">
+        <table id="probabilityTable">
+            <thead>
+            <tr>
+                <th>Digit</th>
+                <th>Probability</th>
+            </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+        <h2>Prediction: <span id="prediction"></span></h2>
+    </div>
+    <div>
+        <canvas id="canvas" width="350" height="350"></canvas>
+        <br>
+        <button id="clearButton">Clear</button>
+    </div>
+    <div id="generatedImages">
+        <h1>Generated Images</h1>
+    </div>
+</div>
 
-    <br/>
-    <h2>Probabilities for each digit:</h2>
-<table id="probabilityTable">
-  <thead>
-    <tr>
-      <th>Digit</th>
-      <th>Probability</th>
-    </tr>
-  </thead>
-  <tbody>
-  </tbody>
-</table>
-    
-    <h2>Prediction: <span id="prediction"></span></h2>
-    <button id="clearButton">Clear</button>
 
-    <!-- Include the ONNX Runtime Web library -->
+
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script>
-      // Canvas setup for drawing
       const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.lineWidth = 30;
+      ctx.lineWidth = 20;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.strokeStyle = 'white';
@@ -69,27 +126,23 @@
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         document.getElementById('prediction').textContent = "";
+        document.getElementById('generatedImages').innerHTML = "";
       };
 
-      // Get image data from the canvas
       const getImgData = () => {
   // Create a temporary canvas to draw a downscaled image.
-  const tempCtx = document.getElementById('tempCanvas').getContext('2d');
-   
+  const tempCtx = document.createElement('canvas').getContext('2d');
 
-  tempCanvas.width = 28;
-  tempCanvas.height = 28;
+   
   tempCtx.filter = 'grayscale(1)';
-  // Draw the original canvas image to the temporary canvas, effectively resizing it.
   tempCtx.drawImage(canvas, 0, 0, 28, 28);
 
-  // Now, extract the image data from the temporary canvas.
   const imageData = tempCtx.getImageData(0, 0, 28, 28);
 
   const data = [];
   for (let i = 0; i < imageData.data.length; i += 4) {
     const grayscale = imageData.data[i];
-    data.push((grayscale) / 255); // Inverted grayscale values
+    data.push((grayscale) / 255); //Normalize the data
   }
 
 
@@ -98,13 +151,72 @@
   const std = 0.3081;
   const standardizedData = data.map(value => (value - mean) / std);
 
-  return standardizedData; // This returns the standardized 1D array suitable for the model input.
+  return standardizedData; 
 };
 
+function randomGaussian(mean = 0, stdDev = 1) {
+    let u1 = 0, u2 = 0;
+    while (u1 === 0) u1 = Math.random(); // Converting [0,1) to (0,1)
+    while (u2 === 0) u2 = Math.random();
+    const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+    return z0 * stdDev + mean;
+}
 
+function tensorToImageData(data) {
+    const width = 28; 
+    const height = 28;
+    const buffer = new Uint8ClampedArray(width * height * 4); // RGBA
+    
+    for (let i = 0; i < width * height; i++) {
+        let pixelValue = (data[i] + 1) * 127.5; 
+        buffer[i * 4] = pixelValue;     
+        buffer[i * 4 + 1] = pixelValue; 
+        buffer[i * 4 + 2] = pixelValue; 
+        buffer[i * 4 + 3] = 255;        
+    }
+
+    return new ImageData(buffer, width, height);
+}
+
+function displayGeneratedImage(imageData) {
+    const scale = 2; 
+
+    const originalCanvas = document.createElement('canvas');
+    originalCanvas.width = imageData.width;
+    originalCanvas.height = imageData.height;
+    const originalCtx = originalCanvas.getContext('2d');
+    originalCtx.putImageData(imageData, 0, 0);
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imageData.width * scale;
+    tempCanvas.height = imageData.height * scale;
+    
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(originalCanvas, 0, 0, imageData.width, imageData.height, 0, 0, tempCanvas.width, tempCanvas.height);
+    
+    const generatedImagesDiv = document.getElementById('generatedImages');
+    const img = new Image();
+    img.src = tempCanvas.toDataURL();
+    generatedImagesDiv.appendChild(img);
+}
+
+
+
+
+
+function generateRandomTensor(rows, cols) {
+    let tensor = [];
+    for (let i = 0; i < rows; i++) {
+        let row = [];
+        for (let j = 0; j < cols; j++) {
+            row.push(randomGaussian());
+        }
+        tensor.push(row);
+    }
+    return tensor;
+}
 
       const softmax = (data) => {
-        // Your softmax function remains unchanged
         const exps = data.map((value) => Math.exp(value));
         const sumExps = exps.reduce((acc, val) => acc + val, 0);
         return exps.map((exp) => exp / sumExps);
@@ -113,58 +225,82 @@
       const main = async () => {
   // Create an ONNX session with the model.
   const session = await ort.InferenceSession.create('./mnist_model.onnx');
+  const session2 = await ort.InferenceSession.create('./mnist_model_cGan.onnx');
+
   
   document.getElementById('clearButton').onclick = async () => {
     clearCanvas();
 
   };
-  const predict = async () => {
-    // Get the image data (28x28) from your canvas or image element.
-    const data = getImgData(); // This function should return a Float32Array representing the image.
 
-    // Create a tensor with the image data.
+
+
+
+  const predict = async () => {
+    const data = getImgData(); 
     const inputTensor = new ort.Tensor('float32', data, [1, 1, 28, 28]);
 
-    // Run the model with the tensor as input.
+
+
     const outputMap = await session.run({ input: inputTensor });
 
-    // Instead of using outputMap.values(), we directly access the output tensor by key.
-    // This assumes 'output' is the name of the output layer. Adjust as necessary for your model.
+
     const outputTensor = outputMap.output;
 
-    // Retrieve the actual data from the tensor.
     const outputData = outputTensor.data;
 
-      // Process the output data here (apply softmax if necessary).
   const probabilities = softmax(Array.from(outputData));
 
-// Find the predicted digit: the index of the highest probability.
 const prediction = probabilities.indexOf(Math.max(...probabilities));
 
-// Update the probabilities display for each digit.
+
+
+
+
 const probabilityTable = document.getElementById('probabilityTable').getElementsByTagName('tbody')[0];
-probabilityTable.innerHTML = ""; // Clear the previous probabilities
+probabilityTable.innerHTML = "";
 
 probabilities.forEach((probability, index) => {
-  // Create a new row and two cells (for the digit and its probability).
   const newRow = probabilityTable.insertRow();
   const digitCell = newRow.insertCell(0);
   const probabilityCell = newRow.insertCell(1);
 
-  // Set the text of the cells.
   digitCell.textContent = index;
-  probabilityCell.textContent = probability.toFixed(4); // Display probability up to 4 decimal places
+  probabilityCell.textContent = probability.toFixed(4); 
 });
     
 document.getElementById('prediction').textContent = prediction;
+
+generateImages();
+
+
     
   };
+
+  const generateImages = async () => {
+const predictionText = document.getElementById('prediction').textContent;
+const predictionValue = parseInt(predictionText, 10);
+
+const randomTensor = generateRandomTensor(1,100);
+const flattenedData = [].concat(...randomTensor);
+console.log(flattenedData);
+const inputTensorGAN = new ort.Tensor('float32', flattenedData, [1, 100]);
+const inputLabelTensor = new ort.Tensor('int64', [predictionValue], [1]);
+const outputMapGAN = await session2.run({ inputTensor: inputTensorGAN , inputLabel: inputLabelTensor});
+const outputTensorGAN = outputMapGAN.output;
+const outputDataGAN = outputTensorGAN.data;
+const imageDataGAN = tensorToImageData(outputDataGAN);
+displayGeneratedImage(imageDataGAN);
+
+};
+
+
+  
 
   canvas.onmouseup = () => {
         isDrawing = false;
         predict();
       };
-
 
 
 };
